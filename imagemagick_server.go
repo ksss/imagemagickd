@@ -1,0 +1,213 @@
+// imagemagick_server
+//   $ go run imagemagick_server.go -host 127.0.0.1:8088
+//   GET http://127.0.0.1:8088/fill/300/300/example.com/path/to/name
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+var cacheDir = flag.String("cachedir", "cache", "File cache dir")
+var cacheSize = flag.Int64("cachesize", 1*1024*1024*1024, "Max file cache size")
+var host = flag.String("host", "127.0.0.1:8888", "Start server hostname:port default) 127.0.0.1:8888")
+
+var client http.Client
+
+// Sort Interface
+type byModTimeDesc []os.FileInfo
+
+func (f byModTimeDesc) Len() int           { return len(f) }
+func (f byModTimeDesc) Less(i, j int) bool { return f[i].ModTime().Second() > f[j].ModTime().Second() }
+func (f byModTimeDesc) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
+
+func init() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+}
+
+func errorServer(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "404 Not Found", http.StatusNotFound)
+}
+
+func checkCache() {
+	infos, err := ioutil.ReadDir(*cacheDir)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+	sort.Sort(byModTimeDesc(infos))
+
+	var sum int64
+	for _, info := range infos {
+		sum = sum + info.Size()
+	}
+	for i := 0; *cacheSize < sum; i++ {
+		sum -= infos[i].Size()
+		fmt.Println("Remove: ", *cacheDir+"/"+infos[i].Name())
+		os.Remove(*cacheDir + "/" + infos[i].Name())
+	}
+}
+
+func parseURL(w http.ResponseWriter, r *http.Request) (fn string, size string, srcPath string, srcFileName string, err error) {
+	path := r.URL.RequestURI()
+	if path[0] != '/' {
+		http.Error(w, "Path should start with /", http.StatusBadRequest)
+		return
+	}
+	parts := strings.SplitN(path[1:], "/", 4)
+
+	fn = parts[0]
+
+	width := parts[1]
+	widthNum, err := strconv.Atoi(width)
+	if err != nil {
+		return
+	}
+	if widthNum <= 0 || 65000 < widthNum {
+		http.Error(w, "Width not specified or invalid", http.StatusBadRequest)
+		err = fmt.Errorf("invalid error width")
+		return
+	}
+
+	height := parts[2]
+	heightNum, err := strconv.Atoi(height)
+	if err != nil {
+		return
+	}
+	if heightNum <= 0 || 65000 < heightNum {
+		http.Error(w, "Height not specified or invalid", http.StatusBadRequest)
+		err = fmt.Errorf("invalid error height")
+		return
+	}
+	size = width + "x" + height
+
+	srcPath = parts[3]
+	index := strings.Index(srcPath, "?")
+	if index == -1 {
+		index = len(srcPath)
+	}
+	srcFileName = *cacheDir + "/" + url.QueryEscape(srcPath[0:index])
+
+	return
+}
+
+func server(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.RequestURI()
+	if path[0] != '/' {
+		http.Error(w, "Path should start with /", http.StatusBadRequest)
+		return
+	}
+	fn, size, srcPath, srcFileName, err := parseURL(w, r)
+	if err != nil {
+		http.Error(w, "Upstream failed Atoi:", http.StatusBadRequest)
+		return
+	}
+
+	_, err = os.Stat(srcFileName)
+	if err == nil {
+		// cache hit
+	} else {
+		// cache miss
+		cacheFile, err := os.OpenFile(srcFileName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+		if err != nil {
+			http.Error(w, "Upstream failed Open: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer func() {
+			cacheFile.Close()
+		}()
+
+		srcReader, err := http.Get("http://" + srcPath)
+		if err != nil {
+			http.Error(w, "Upstream failed Get: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer srcReader.Body.Close()
+
+		if srcReader.StatusCode != http.StatusOK {
+			http.Error(w, "Upstream failed HttpStatus: "+srcReader.Status, srcReader.StatusCode)
+			return
+		}
+
+		io.Copy(cacheFile, srcReader.Body)
+		go checkCache()
+	}
+
+	tempfile, err := ioutil.TempFile("", "thumb")
+	if err != nil {
+		http.Error(w, "Upstream failed Tempfile: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer func() {
+		tempfile.Close()
+		os.Remove(tempfile.Name())
+	}()
+
+	switch fn {
+	case "fit":
+		cmd := exec.Command(
+			"convert",
+			"-define", "jpeg:size="+size,
+			"-thumbnail", size,
+			srcFileName,
+			tempfile.Name(),
+		)
+		err := cmd.Run()
+		if err != nil {
+			http.Error(w, "Upstream failed cmd Run: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+	case "fill":
+		cmd := exec.Command(
+			"convert",
+			"-define", "jpeg:size="+size,
+			"-thumbnail", size+"^",
+			"-gravity", "center",
+			"-extent", size,
+			srcFileName,
+			tempfile.Name(),
+		)
+		err = cmd.Run()
+		if err != nil {
+			http.Error(w, "Upstream failed cmd Run: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+	tempfile.Close()
+
+	file, err := os.Open(tempfile.Name())
+	if err != nil {
+		http.Error(w, "Upstream failed open: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer file.Close()
+
+	io.Copy(w, file)
+}
+
+func main() {
+	flag.Parse()
+	_ = os.Mkdir(*cacheDir, 0777)
+	http.HandleFunc("/", server)
+	http.HandleFunc("/favicon.ico", errorServer)
+	fmt.Println(*host)
+	err := http.ListenAndServe(*host, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
