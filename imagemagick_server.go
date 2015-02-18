@@ -31,7 +31,7 @@ var host = flag.String("host", "127.0.0.1:8888", "Start server hostname:port def
 var optsPath = flag.String("opts", "./opts.yml", "functions for imagemagick")
 
 var client http.Client
-var opts map[string][][]string
+var opts map[string][]string
 
 // Sort Interface
 type byModTimeDesc []os.FileInfo
@@ -44,13 +44,13 @@ func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 }
 
-func readYaml() {
+func readOpts() {
 	buf, err := ioutil.ReadFile(*optsPath)
 	if err != nil {
 		panic(err)
 	}
 
-	opts = make(map[string][][]string)
+	opts = make(map[string][]string)
 	err = yaml.Unmarshal(buf, &opts)
 	if err != nil {
 		panic(err)
@@ -175,26 +175,30 @@ func server(w http.ResponseWriter, r *http.Request) {
 		os.Remove(tempfile.Name())
 	}()
 
-	for _, cmdStrs := range opts[fn] {
-		var cmdRet []string
-		for _, cmdStr := range cmdStrs {
+	var targetName string
+	if fn != "none" {
+		cmdRet := []string{"OMP_NUM_THREADS=1", "convert"}
+		for _, cmdStr := range opts[fn] {
 			cmdStr = strings.Replace(cmdStr, "{{width}}", width, -1)
 			cmdStr = strings.Replace(cmdStr, "{{height}}", height, -1)
 			cmdRet = append(cmdRet, regexp.MustCompile("\\s+").Split(cmdStr, -1)...)
 		}
+
 		cmdRet = append(cmdRet, srcFileName, tempfile.Name())
-		err := exec.Command("convert", cmdRet...).Run()
+		err = exec.Command("env", cmdRet...).Run()
 		if err != nil {
 			http.Error(w, "Upstream failed cmd Run: "+err.Error(), http.StatusBadGateway)
 			return
 		}
+		targetName = tempfile.Name()
+	} else {
+		targetName = srcFileName
 	}
 
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
-	tempfile.Close()
 
-	file, err := os.Open(tempfile.Name())
+	file, err := os.Open(targetName)
 	if err != nil {
 		http.Error(w, "Upstream failed open: "+err.Error(), http.StatusBadGateway)
 		return
