@@ -149,7 +149,7 @@ func server(w http.ResponseWriter, r *http.Request) {
 			cacheFile.Close()
 		}()
 
-		srcReader, err := http.Get("http://" + srcPath)
+		srcReader, err := http.Get("https://" + srcPath)
 		if err != nil {
 			http.Error(w, "Upstream failed Get: "+err.Error(), http.StatusBadGateway)
 			return
