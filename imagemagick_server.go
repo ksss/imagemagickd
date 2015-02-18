@@ -13,18 +13,23 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v2"
 )
 
 var cacheDir = flag.String("cachedir", "cache", "File cache dir")
 var cacheSize = flag.Int64("cachesize", 1*1024*1024*1024, "Max file cache size")
 var host = flag.String("host", "127.0.0.1:8888", "Start server hostname:port default) 127.0.0.1:8888")
+var optsPath = flag.String("opts", "./opts.yml", "functions for imagemagick")
 
 var client http.Client
+var opts map[string][][]string
 
 // Sort Interface
 type byModTimeDesc []os.FileInfo
@@ -35,6 +40,20 @@ func (f byModTimeDesc) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }
 
 func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+}
+
+func readYaml() {
+	buf, err := ioutil.ReadFile(*optsPath)
+	if err != nil {
+		panic(err)
+	}
+
+	opts = make(map[string][][]string)
+	err = yaml.Unmarshal(buf, &opts)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("load opts=" + *optsPath)
 }
 
 func errorServer(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +79,7 @@ func checkCache() {
 	}
 }
 
-func parseURL(w http.ResponseWriter, r *http.Request) (fn string, size string, srcPath string, srcFileName string, err error) {
+func parseURL(w http.ResponseWriter, r *http.Request) (fn string, width string, height string, srcPath string, srcFileName string, err error) {
 	path := r.URL.RequestURI()
 	if path[0] != '/' {
 		http.Error(w, "Path should start with /", http.StatusBadRequest)
@@ -70,7 +89,7 @@ func parseURL(w http.ResponseWriter, r *http.Request) (fn string, size string, s
 
 	fn = parts[0]
 
-	width := parts[1]
+	width = parts[1]
 	widthNum, err := strconv.Atoi(width)
 	if err != nil {
 		return
@@ -81,7 +100,7 @@ func parseURL(w http.ResponseWriter, r *http.Request) (fn string, size string, s
 		return
 	}
 
-	height := parts[2]
+	height = parts[2]
 	heightNum, err := strconv.Atoi(height)
 	if err != nil {
 		return
@@ -91,7 +110,6 @@ func parseURL(w http.ResponseWriter, r *http.Request) (fn string, size string, s
 		err = fmt.Errorf("invalid error height")
 		return
 	}
-	size = width + "x" + height
 
 	srcPath = parts[3]
 	index := strings.Index(srcPath, "?")
@@ -109,7 +127,7 @@ func server(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Path should start with /", http.StatusBadRequest)
 		return
 	}
-	fn, size, srcPath, srcFileName, err := parseURL(w, r)
+	fn, width, height, srcPath, srcFileName, err := parseURL(w, r)
 	if err != nil {
 		http.Error(w, "Upstream failed Atoi:", http.StatusBadRequest)
 		return
@@ -155,31 +173,15 @@ func server(w http.ResponseWriter, r *http.Request) {
 		os.Remove(tempfile.Name())
 	}()
 
-	switch fn {
-	case "fit":
-		cmd := exec.Command(
-			"convert",
-			"-define", "jpeg:size="+size,
-			"-thumbnail", size,
-			srcFileName,
-			tempfile.Name(),
-		)
-		err := cmd.Run()
-		if err != nil {
-			http.Error(w, "Upstream failed cmd Run: "+err.Error(), http.StatusBadGateway)
-			return
+	for _, cmdStrs := range opts[fn] {
+		var cmdRet []string
+		for _, cmdStr := range cmdStrs {
+			cmdStr = strings.Replace(cmdStr, "{{width}}", width, -1)
+			cmdStr = strings.Replace(cmdStr, "{{height}}", height, -1)
+			cmdRet = append(cmdRet, regexp.MustCompile("\\s+").Split(cmdStr, -1)...)
 		}
-	case "fill":
-		cmd := exec.Command(
-			"convert",
-			"-define", "jpeg:size="+size,
-			"-thumbnail", size+"^",
-			"-gravity", "center",
-			"-extent", size,
-			srcFileName,
-			tempfile.Name(),
-		)
-		err = cmd.Run()
+		cmdRet = append(cmdRet, srcFileName, tempfile.Name())
+		err := exec.Command("convert", cmdRet...).Run()
 		if err != nil {
 			http.Error(w, "Upstream failed cmd Run: "+err.Error(), http.StatusBadGateway)
 			return
@@ -203,6 +205,7 @@ func server(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 	_ = os.Mkdir(*cacheDir, 0777)
+	readYaml()
 	http.HandleFunc("/", server)
 	http.HandleFunc("/favicon.ico", errorServer)
 	fmt.Println(*host)
