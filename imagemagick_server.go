@@ -211,17 +211,17 @@ func server(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 	_ = os.Mkdir(*cacheDir, 0777)
-	readYaml()
+	readOpts()
 	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGHUP)
 	go func() {
 		for {
 			switch <-c {
 			case syscall.SIGHUP:
-				readYaml()
+				readOpts()
 			}
 		}
 	}()
-	signal.Notify(c, syscall.SIGHUP)
 	http.HandleFunc("/", server)
 	http.HandleFunc("/favicon.ico", errorServer)
 	fmt.Println(*host)
