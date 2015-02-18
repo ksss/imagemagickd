@@ -13,11 +13,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -206,6 +208,16 @@ func main() {
 	flag.Parse()
 	_ = os.Mkdir(*cacheDir, 0777)
 	readYaml()
+	c := make(chan os.Signal, 1)
+	go func() {
+		for {
+			switch <-c {
+			case syscall.SIGHUP:
+				readYaml()
+			}
+		}
+	}()
+	signal.Notify(c, syscall.SIGHUP)
 	http.HandleFunc("/", server)
 	http.HandleFunc("/favicon.ico", errorServer)
 	fmt.Println(*host)
