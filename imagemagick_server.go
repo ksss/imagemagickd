@@ -96,7 +96,7 @@ func parseURL(w http.ResponseWriter, r *http.Request) (fn string, width string, 
 	if err != nil {
 		return
 	}
-	if widthNum <= 0 || 65000 < widthNum {
+	if widthNum <= 0 || 5000 < widthNum {
 		http.Error(w, "Width not specified or invalid", http.StatusBadRequest)
 		err = fmt.Errorf("invalid error width")
 		return
@@ -107,7 +107,7 @@ func parseURL(w http.ResponseWriter, r *http.Request) (fn string, width string, 
 	if err != nil {
 		return
 	}
-	if heightNum <= 0 || 65000 < heightNum {
+	if heightNum <= 0 || 5000 < heightNum {
 		http.Error(w, "Height not specified or invalid", http.StatusBadRequest)
 		err = fmt.Errorf("invalid error height")
 		return
