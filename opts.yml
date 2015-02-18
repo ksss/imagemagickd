@@ -1,0 +1,9 @@
+fit:
+- - -define jpeg:size={{width}}x{{height}}
+  - -thumbnail {{width}}x{{height}}
+
+fill:
+- - -define jpeg:size={{width}}x{{height}}
+  - -thumbnail {{width}}x{{height}}^
+  - -gravity center
+  - -extent {{width}}x{{height}}
