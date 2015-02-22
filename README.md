@@ -4,13 +4,13 @@ imagemagickd
 Start server on 127.0.0.1:8088
 
 ```
-$ go run imagemagick_server.go -host 127.0.0.1:8088
+$ go run imagemagick_server.go
 ```
 
 and open to
 
 ```
-http://127.0.0.1:8088/fill/300/300/any_host/any_path
+http://127.0.0.1:8888/fill/300/300/any_host/any_path
 ```
 
 # Arguments
@@ -21,7 +21,7 @@ http://127.0.0.1:8088/fill/300/300/any_host/any_path
 
 - fill
 - fit
-- ... and want to pluggable in future
+- and pluggable function by opts.yml
 
 # feature
 
