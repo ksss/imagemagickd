@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,7 +28,7 @@ import (
 
 var cacheDir = flag.String("cachedir", "cache", "File cache dir")
 var cacheSize = flag.Int64("cachesize", 1*1024*1024*1024, "Max file cache size")
-var host = flag.String("host", "127.0.0.1:8888", "Start server hostname:port default) 127.0.0.1:8888")
+var bind = flag.String("bind", "8888", "Start server on port or unix domain socket path")
 var optsPath = flag.String("opts", "./opts.yml", "functions for imagemagick")
 
 var client http.Client
@@ -224,9 +225,25 @@ func main() {
 	}()
 	http.HandleFunc("/", server)
 	http.HandleFunc("/favicon.ico", errorServer)
-	fmt.Println(*host)
-	err := http.ListenAndServe(*host, nil)
+
+	fmt.Println("listen: " + *bind)
+	_, err := strconv.Atoi(*bind)
 	if err != nil {
-		log.Fatal(err)
+		// listen unix domain socket
+		os.Remove(*bind)
+		listnr, err := net.Listen("unix", *bind)
+		if err != nil {
+			panic(err)
+		}
+		err = http.Serve(listnr, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		// listen tcp port
+		err := http.ListenAndServe(":"+*bind, nil)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
