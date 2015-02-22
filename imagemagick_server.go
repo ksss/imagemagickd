@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -235,9 +234,13 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		err = os.Chmod(*bind, 0777)
+		if err != nil {
+			panic(err)
+		}
 		err = http.Serve(listnr, nil)
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 	} else {
 		// listen tcp port
