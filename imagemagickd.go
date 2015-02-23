@@ -1,6 +1,6 @@
 // imagemagick_server
-//   $ go run imagemagick_server.go -host 127.0.0.1:8088
-//   GET http://127.0.0.1:8088/fill/300/300/example.com/path/to/name
+//   $ go run imagemagick_server.go
+//   GET http://127.0.0.1:8888/fill/300/300/example.com/path/to/name
 package main
 
 import (
