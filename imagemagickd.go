@@ -195,15 +195,19 @@ func server(w http.ResponseWriter, r *http.Request) {
 		targetName = srcFileName
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
-
 	file, err := os.Open(targetName)
 	if err != nil {
 		http.Error(w, "Upstream failed open: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer file.Close()
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+	fileinfo, err := file.Stat()
+	if err == nil {
+		w.Header().Set("Content-Length", fmt.Sprint(fileinfo.Size()))
+	}
 
 	io.Copy(w, file)
 }
