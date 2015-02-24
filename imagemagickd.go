@@ -27,7 +27,7 @@ import (
 
 var cacheDir = flag.String("cachedir", "cache", "File cache dir")
 var cacheSize = flag.Int64("cachesize", 1*1024*1024*1024, "Max file cache size")
-var bind = flag.String("bind", "8888", "Start server on port or unix domain socket path")
+var bind = flag.String("bind", ":8888", "Start server on port or unix domain socket path or fd")
 var optsPath = flag.String("opts", "./opts.yml", "functions for imagemagick")
 
 var client http.Client
@@ -229,12 +229,19 @@ func main() {
 	http.HandleFunc("/", server)
 	http.HandleFunc("/favicon.ico", errorServer)
 
-	fmt.Println("listen: " + *bind)
-	_, err := strconv.Atoi(*bind)
-	if err != nil {
+	bindNum, err := strconv.Atoi(*bind)
+
+	var ln net.Listener
+	if 0 < bindNum {
+		ln, err = net.FileListener(os.NewFile(uintptr(bindNum), ""))
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("listen on fd: " + *bind)
+	} else if (*bind)[0] == '/' {
 		// listen unix domain socket
 		os.Remove(*bind)
-		listnr, err := net.Listen("unix", *bind)
+		ln, err = net.Listen("unix", *bind)
 		if err != nil {
 			panic(err)
 		}
@@ -242,15 +249,17 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		err = http.Serve(listnr, nil)
-		if err != nil {
-			panic(err)
-		}
-	} else {
+		fmt.Println("listen on unix sockets: " + *bind)
+	} else if (*bind)[0] == ':' {
 		// listen tcp port
-		err := http.ListenAndServe(":"+*bind, nil)
+		ln, err = net.Listen("tcp", *bind)
 		if err != nil {
 			panic(err)
 		}
+		fmt.Println("listen on port: " + *bind)
+	} else {
+		panic("you must set bind fd(e.g. '5') or unix sockets path(e.g. '/tmp/path') or port(e.g. ':8888')")
 	}
+
+	http.Serve(ln, nil)
 }
