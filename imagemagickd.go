@@ -177,15 +177,15 @@ func server(w http.ResponseWriter, r *http.Request) {
 
 	var targetName string
 	if fn != "none" {
-		cmdRet := []string{"OMP_NUM_THREADS=1", "convert"}
+		cmdRet := []string{"env", "OMP_NUM_THREADS=1", "convert"}
 		for _, cmdStr := range opts[fn] {
 			cmdStr = strings.Replace(cmdStr, "{{width}}", width, -1)
 			cmdStr = strings.Replace(cmdStr, "{{height}}", height, -1)
 			cmdRet = append(cmdRet, regexp.MustCompile("\\s+").Split(cmdStr, -1)...)
 		}
-
 		cmdRet = append(cmdRet, srcFileName, tempfile.Name())
-		err = exec.Command("env", cmdRet...).Run()
+
+		err = exec.Command(cmdRet[0], cmdRet[1:]...).Run()
 		if err != nil {
 			http.Error(w, "Upstream failed cmd Run: "+err.Error(), http.StatusBadGateway)
 			return
